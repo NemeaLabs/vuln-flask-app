@@ -1,0 +1,52 @@
+name: AI Vulnerability Triage
+
+on:
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
+
+concurrency:
+  group: ai-triage-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  triage:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: pip }
+
+      - name: Fetch triage CLI
+        run: git clone --depth 1 https://github.com/claude-access/vuln-triage /tmp/triage
+
+      - name: Install deps
+        run: |
+          pip install -r /tmp/triage/triage-cli/requirements.txt
+          pip install semgrep
+
+      - name: Run triage
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set +e
+          python /tmp/triage/triage-cli/triage.py . \
+            --baseline "${{ github.event.pull_request.base.sha }}" \
+            --out report --fail-on high-tp
+          echo "exit_code=$?" >> "$GITHUB_ENV"
+          set -e
+
+      - name: Ensure report exists
+        run: |
+          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report\n\nThe job did not produce a report. Check logs.\n' > report.md
+
+      - uses: marocchino/sticky-pull-request-comment@v2
+        with: { header: ai-triage, path: report.md }
+
+      - if: env.exit_code != '0'
+        run: exit 1
