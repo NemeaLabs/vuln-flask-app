@@ -1,0 +1,6 @@
+# Deliberately pinned to versions with known CVEs so Phase 5 (SCA triage) has
+# something real to chew on. DO NOT USE IN REAL PROJECTS.
+Flask==2.0.1
+Jinja2==2.11.2        # CVE-2020-28493 (ReDoS in urlize)
+requests==2.25.0      # several CVEs including CVE-2023-32681 (proxy-Authorization leak)
+Werkzeug==2.0.1
