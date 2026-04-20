@@ -1,5 +1,6 @@
 """
 Deliberately vulnerable Flask app used to test the AI triage pipeline.
+retest
 
 See README.md for the full inventory of seeded vulnerabilities. Each finding
 is labeled in the README as TP (true positive), TP-subtle, or FP-trap.
