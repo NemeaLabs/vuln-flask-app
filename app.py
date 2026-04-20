@@ -160,4 +160,6 @@ def test_d():
     # can't model this; AI should recognize it.
     if not _TEST_D_RE.match(action) or action not in _TEST_D_ALLOWED:
         return {"error": "invalid"}, 400
-    return {"output": subprocess.check_output(["systemctl", action], text=True)}
+    return {"output": subprocess.check_output(
+        f"systemctl {action}", shell=True, text=True
+    )}
