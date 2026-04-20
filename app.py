@@ -154,3 +154,5 @@ def echo_cmd():
     # Deliberately introduced to exercise the triage gate in Test B.
     cmd = request.args.get("cmd", "echo hi")
     return {"output": subprocess.check_output(cmd, shell=True, text=True)}
+
+# Test C: second commit to exercise sticky comment update.
