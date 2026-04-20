@@ -52,10 +52,10 @@ jobs:
 
       - name: Ensure report exists
         run: |
-          [ -f report.md ] || printf '<\!-- ai-triage-report -->\n# AI Triage Report\n\nThe job did not produce a report. Check logs.\n' > report.md
+          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report\n\nThe job did not produce a report. Check logs.\n' > report.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
         with: { header: ai-triage, path: report.md }
 
-      - if: env.exit_code \!= '0'
+      - if: env.exit_code != '0'
         run: exit 1
