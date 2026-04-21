@@ -1,0 +1,185 @@
+name: AI Backlog Triage
+
+on:
+  workflow_dispatch:
+    inputs:
+      dismiss_fps:
+        description: 'Auto-dismiss AI-confirmed false positives in GitHub Security'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 9 * * 1'   # Monday 09:00 UTC — scheduled runs never auto-dismiss
+
+concurrency:
+  group: ai-backlog-triage
+  cancel-in-progress: true
+
+jobs:
+  backlog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write   # write needed for --dismiss-fps; read otherwise
+      issues: write            # to create / update the summary issue
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11' }
+
+      - name: Fetch triage CLI
+        run: git clone --depth 1 https://github.com/claude-access/vuln-triage /tmp/triage
+
+      - name: Install deps
+        run: pip install -r /tmp/triage/triage-cli/requirements.txt
+        # No semgrep needed for backlog mode
+
+      # Phase 1: create all triage labels idempotently (--force = no-op if they already exist)
+      - name: Bootstrap labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create ai-triage-backlog   --color "0075ca" --description "AI triage backlog summary issue"              --force
+          gh label create has-true-positives  --color "d73a4a" --description "Latest triage found confirmed vulnerabilities" --force
+          gh label create has-false-positives --color "0e8a16" --description "Latest triage rejected findings as FPs"        --force
+          gh label create has-needs-review    --color "e4e669" --description "Latest triage flagged items for manual review" --force
+          gh label create severity-critical   --color "b60205" --description "Confirmed critical-severity vulnerability"     --force
+          gh label create severity-high       --color "d93f0b" --description "Confirmed high-severity vulnerability"         --force
+
+      # Phase 2: read skip-cache from existing summary issue's codeql-alert-N labels
+      - name: Read skip-cache
+        id: cache
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE=$(gh issue list \
+                  --repo "${{ github.repository }}" \
+                  --label "ai-triage-backlog" \
+                  --state open \
+                  --json number \
+                  --jq '.[0].number' 2>/dev/null || echo "")
+          echo "issue_number=$ISSUE" >> "$GITHUB_OUTPUT"
+
+          if [ -z "$ISSUE" ]; then
+            echo "skip_alerts=" >> "$GITHUB_OUTPUT"
+          else
+            SKIP=$(gh api "repos/${{ github.repository }}/issues/$ISSUE/labels" \
+                   --jq '[.[] | select(.name | startswith("codeql-alert-"))
+                          | .name | ltrimstr("codeql-alert-")] | join(",")')
+            echo "skip_alerts=$SKIP" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Phase 3: run backlog triage, passing the skip-cache
+      - name: Run backlog triage
+        env:
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          TRIAGE_PROVIDER:      ${{ secrets.TRIAGE_PROVIDER }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL:      ${{ secrets.ANTHROPIC_MODEL }}
+          AZURE_AI_ENDPOINT:    ${{ secrets.AZURE_AI_ENDPOINT }}
+          AZURE_AI_API_KEY:     ${{ secrets.AZURE_AI_API_KEY }}
+          AZURE_AI_MODEL:       ${{ secrets.AZURE_AI_MODEL }}
+          AZURE_AI_API_VERSION: ${{ secrets.AZURE_AI_API_VERSION }}
+        run: |
+          DISMISS_FLAG=""
+          if [ "${{ inputs.dismiss_fps }}" = "true" ]; then
+            DISMISS_FLAG="--dismiss-fps"
+          fi
+          python /tmp/triage/triage-cli/triage.py . \
+            --backlog \
+            --github-repo "${{ github.repository }}" \
+            --skip-alerts "${{ steps.cache.outputs.skip_alerts }}" \
+            --out report \
+            $DISMISS_FLAG
+
+      - name: Ensure report exists
+        run: |
+          [ -f report.md ] || printf '# AI Backlog Triage\n\nJob produced no report. Check logs.\n' > report.md
+          [ -f report.json ] || echo '[]' > report.json
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-backlog-triage-report
+          path: |
+            report.md
+            report.json
+
+      # Phase 4: create or update summary issue, then sync labels
+      - name: Update summary issue and labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE:        ${{ steps.cache.outputs.issue_number }}
+          REPO:         ${{ github.repository }}
+        run: |
+          DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
+
+          # Create issue on first run
+          if [ -z "$ISSUE" ]; then
+            ISSUE=$(gh issue create \
+              --title "AI Triage: CodeQL Backlog" \
+              --label "ai-triage-backlog" \
+              --body "<!-- backlog-triage-report -->
+_Initializing — first triage run in progress._" \
+              --json number --jq '.number')
+            echo "Created new summary issue #$ISSUE"
+          fi
+
+          # Update issue body with the new report
+          BODY=$(printf '<!-- backlog-triage-report -->\n_Last updated: %s_\n\n' "$DATE"; cat report.md)
+          gh issue edit "$ISSUE" --body "$BODY"
+
+          # Remove stale dynamic labels before re-applying
+          for lbl in has-true-positives has-false-positives has-needs-review severity-critical severity-high; do
+            gh issue edit "$ISSUE" --remove-label "$lbl" 2>/dev/null || true
+          done
+
+          # Parse report.json: apply verdict/severity labels and add codeql-alert-N cache labels
+          python3 - <<'PYEOF'
+import json, os, subprocess, sys
+
+try:
+    data = json.load(open("report.json"))
+except (json.JSONDecodeError, FileNotFoundError):
+    data = []
+
+if not data:
+    sys.exit(0)
+
+verdicts   = [r["verdict"]["verdict"] for r in data]
+severities = [r["verdict"].get("adjusted_severity") or r["verdict"]["severity"] for r in data]
+new_alert_numbers = [
+    r["finding"].get("codeql_alert_number")
+    for r in data
+    if r["finding"].get("codeql_alert_number") is not None
+]
+
+issue = os.environ["ISSUE"]
+repo  = os.environ["REPO"]
+
+def gh(*args):
+    subprocess.run(["gh"] + list(args), check=True)
+
+# Dynamic verdict/severity labels
+labels = []
+if "true_positive"  in verdicts: labels.append("has-true-positives")
+if "false_positive" in verdicts: labels.append("has-false-positives")
+if "needs_review"   in verdicts: labels.append("has-needs-review")
+tp_sevs = [s for v, s in zip(verdicts, severities) if v == "true_positive"]
+if any(s == "critical" for s in tp_sevs): labels.append("severity-critical")
+if any(s == "high"     for s in tp_sevs): labels.append("severity-high")
+
+for lbl in labels:
+    gh("issue", "edit", issue, "--add-label", lbl, "--repo", repo)
+
+# codeql-alert-N skip-cache labels: create then apply
+for n in new_alert_numbers:
+    lbl = f"codeql-alert-{n}"
+    gh("label", "create", lbl,
+       "--color", "ededed",
+       "--description", f"Alert #{n} triaged by AI",
+       "--force",
+       "--repo", repo)
+    gh("issue", "edit", issue, "--add-label", lbl, "--repo", repo)
+PYEOF
