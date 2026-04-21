@@ -115,14 +115,14 @@ jobs:
         run: |
           DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
 
-          # Create issue on first run
+          # Create issue on first run; gh issue create returns the URL, extract the number
           if [ -z "$ISSUE" ]; then
             printf '<!-- backlog-triage-report -->\n_Initializing — first triage run in progress._\n' > /tmp/init_body.md
-            ISSUE=$(gh issue create \
+            ISSUE_URL=$(gh issue create \
               --title "AI Triage: CodeQL Backlog" \
               --label "ai-triage-backlog" \
-              --body-file /tmp/init_body.md \
-              --json number --jq '.number')
+              --body-file /tmp/init_body.md)
+            ISSUE=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')
             echo "Created new summary issue #$ISSUE"
           fi
 
