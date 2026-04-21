@@ -91,6 +91,7 @@ jobs:
             --github-repo "${{ github.repository }}" \
             --skip-alerts "${{ steps.cache.outputs.skip_alerts }}" \
             --out report \
+            --post-comments \
             $DISMISS_FLAG
 
       - name: Ensure report exists
