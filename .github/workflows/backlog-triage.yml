@@ -1,0 +1,137 @@
+name: AI Backlog Triage
+
+on:
+  workflow_dispatch:
+    inputs:
+      dismiss_fps:
+        description: 'Auto-dismiss AI-confirmed false positives in GitHub Security'
+        type: boolean
+        default: false
+  schedule:
+    - cron: '0 9 * * 1'   # Monday 09:00 UTC — scheduled runs never auto-dismiss
+
+concurrency:
+  group: ai-backlog-triage
+  cancel-in-progress: true
+
+jobs:
+  backlog:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      issues: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Phase 1: create all triage labels idempotently
+      - name: Bootstrap labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create ai-triage-backlog   --color "0075ca" --description "AI triage backlog summary issue"              --force
+          gh label create has-true-positives  --color "d73a4a" --description "Latest triage found confirmed vulnerabilities" --force
+          gh label create has-false-positives --color "0e8a16" --description "Latest triage rejected findings as FPs"        --force
+          gh label create has-needs-review    --color "e4e669" --description "Latest triage flagged items for manual review" --force
+          gh label create severity-critical   --color "b60205" --description "Confirmed critical-severity vulnerability"     --force
+          gh label create severity-high       --color "d93f0b" --description "Confirmed high-severity vulnerability"         --force
+
+      # Phase 2: ensure summary issue exists, read skip-cache labels
+      - name: Ensure summary issue + read skip-cache
+        id: cache
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ISSUE=$(gh issue list \
+                  --repo "${{ github.repository }}" \
+                  --label "ai-triage-backlog" \
+                  --state open \
+                  --json number \
+                  --jq '.[0].number' 2>/dev/null || echo "")
+
+          if [ -z "$ISSUE" ]; then
+            printf '<!-- backlog-triage-report -->\n_Initializing — first triage run in progress._\n' > /tmp/init_body.md
+            ISSUE_URL=$(gh issue create \
+              --title "AI Triage: CodeQL Backlog" \
+              --label "ai-triage-backlog" \
+              --body-file /tmp/init_body.md)
+            ISSUE=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')
+            echo "Created summary issue #$ISSUE"
+          fi
+
+          echo "issue_number=$ISSUE" >> "$GITHUB_OUTPUT"
+
+          SKIP=$(gh api "repos/${{ github.repository }}/issues/$ISSUE/labels" \
+                 --jq '[.[] | select(.name | startswith("codeql-alert-"))
+                        | .name | ltrimstr("codeql-alert-")] | join(",")')
+          echo "skip_alerts=$SKIP" >> "$GITHUB_OUTPUT"
+
+      # Phase 3: run Arbiter
+      - name: Run Arbiter
+        uses: NemeaLabs/arbiter@v1
+        with:
+          mode: backlog
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          triage-provider: ${{ secrets.TRIAGE_PROVIDER }}
+          anthropic-model: ${{ secrets.ANTHROPIC_MODEL }}
+          azure-ai-endpoint: ${{ secrets.AZURE_AI_ENDPOINT }}
+          azure-ai-api-key: ${{ secrets.AZURE_AI_API_KEY }}
+          azure-ai-model: ${{ secrets.AZURE_AI_MODEL }}
+          azure-ai-api-version: ${{ secrets.AZURE_AI_API_VERSION }}
+          skip-alerts: ${{ steps.cache.outputs.skip_alerts }}
+          post-comments: 'true'
+          summary-issue: ${{ steps.cache.outputs.issue_number }}
+          dismiss-fps: ${{ inputs.dismiss_fps || 'false' }}
+          out: report
+
+      - name: Ensure report exists
+        run: |
+          [ -f report.md ] || printf '# AI Backlog Triage\n\nJob produced no report. Check logs.\n' > report.md
+          [ -f report.json ] || echo '[]' > report.json
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-backlog-triage-report
+          path: |
+            report.md
+            report.json
+
+      # Phase 4: update summary issue body and sync labels
+      - name: Update summary issue and labels
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE:        ${{ steps.cache.outputs.issue_number }}
+          REPO:         ${{ github.repository }}
+        run: |
+          DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
+
+          BODY=$(printf '<!-- backlog-triage-report -->\n_Last updated: %s_\n\n' "$DATE"; cat report.md)
+          gh issue edit "$ISSUE" --body "$BODY"
+
+          for lbl in has-true-positives has-false-positives has-needs-review severity-critical severity-high; do
+            gh issue edit "$ISSUE" --remove-label "$lbl" 2>/dev/null || true
+          done
+
+          if [ -s report.json ] && [ "$(cat report.json)" != "[]" ]; then
+            jq -r '
+              if [.[] | select(.verdict.verdict == "true_positive")]  | length > 0 then "has-true-positives"  else empty end,
+              if [.[] | select(.verdict.verdict == "false_positive")] | length > 0 then "has-false-positives" else empty end,
+              if [.[] | select(.verdict.verdict == "needs_review")]   | length > 0 then "has-needs-review"    else empty end,
+              if [.[] | select(.verdict.verdict == "true_positive" and (.verdict.adjusted_severity // .verdict.severity) == "critical")] | length > 0 then "severity-critical" else empty end,
+              if [.[] | select(.verdict.verdict == "true_positive" and (.verdict.adjusted_severity // .verdict.severity) == "high")]     | length > 0 then "severity-high"     else empty end
+            ' report.json | while read -r lbl; do
+              gh issue edit "$ISSUE" --add-label "$lbl" --repo "$REPO"
+            done
+
+            jq -r '[.[] | .finding.codeql_alert_number | select(. != null)] | .[]' report.json \
+            | while read -r n; do
+              gh label create "codeql-alert-$n" \
+                --color "ededed" \
+                --description "Alert #$n triaged by AI" \
+                --force --repo "$REPO"
+              gh issue edit "$ISSUE" --add-label "codeql-alert-$n" --repo "$REPO"
+            done
+          fi
