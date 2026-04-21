@@ -47,8 +47,8 @@ jobs:
           gh label create severity-critical   --color "b60205" --description "Confirmed critical-severity vulnerability"     --force
           gh label create severity-high       --color "d93f0b" --description "Confirmed high-severity vulnerability"         --force
 
-      # Phase 2: read skip-cache from existing summary issue's codeql-alert-N labels
-      - name: Read skip-cache
+      # Phase 2: ensure summary issue exists, then read skip-cache labels
+      - name: Ensure summary issue + read skip-cache
         id: cache
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -59,16 +59,23 @@ jobs:
                   --state open \
                   --json number \
                   --jq '.[0].number' 2>/dev/null || echo "")
-          echo "issue_number=$ISSUE" >> "$GITHUB_OUTPUT"
 
           if [ -z "$ISSUE" ]; then
-            echo "skip_alerts=" >> "$GITHUB_OUTPUT"
-          else
-            SKIP=$(gh api "repos/${{ github.repository }}/issues/$ISSUE/labels" \
-                   --jq '[.[] | select(.name | startswith("codeql-alert-"))
-                          | .name | ltrimstr("codeql-alert-")] | join(",")')
-            echo "skip_alerts=$SKIP" >> "$GITHUB_OUTPUT"
+            printf '<!-- backlog-triage-report -->\n_Initializing — first triage run in progress._\n' > /tmp/init_body.md
+            ISSUE_URL=$(gh issue create \
+              --title "AI Triage: CodeQL Backlog" \
+              --label "ai-triage-backlog" \
+              --body-file /tmp/init_body.md)
+            ISSUE=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')
+            echo "Created summary issue #$ISSUE"
           fi
+
+          echo "issue_number=$ISSUE" >> "$GITHUB_OUTPUT"
+
+          SKIP=$(gh api "repos/${{ github.repository }}/issues/$ISSUE/labels" \
+                 --jq '[.[] | select(.name | startswith("codeql-alert-"))
+                        | .name | ltrimstr("codeql-alert-")] | join(",")')
+          echo "skip_alerts=$SKIP" >> "$GITHUB_OUTPUT"
 
       # Phase 3: run backlog triage, passing the skip-cache
       - name: Run backlog triage
@@ -92,6 +99,7 @@ jobs:
             --skip-alerts "${{ steps.cache.outputs.skip_alerts }}" \
             --out report \
             --post-comments \
+            --summary-issue "${{ steps.cache.outputs.issue_number }}" \
             $DISMISS_FLAG
 
       - name: Ensure report exists
@@ -107,7 +115,7 @@ jobs:
             report.md
             report.json
 
-      # Phase 4: create or update summary issue, then sync labels
+      # Phase 4: update summary issue body and sync labels
       - name: Update summary issue and labels
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -115,17 +123,6 @@ jobs:
           REPO:         ${{ github.repository }}
         run: |
           DATE=$(date -u '+%Y-%m-%d %H:%M UTC')
-
-          # Create issue on first run; gh issue create returns the URL, extract the number
-          if [ -z "$ISSUE" ]; then
-            printf '<!-- backlog-triage-report -->\n_Initializing — first triage run in progress._\n' > /tmp/init_body.md
-            ISSUE_URL=$(gh issue create \
-              --title "AI Triage: CodeQL Backlog" \
-              --label "ai-triage-backlog" \
-              --body-file /tmp/init_body.md)
-            ISSUE=$(echo "$ISSUE_URL" | grep -oE '[0-9]+$')
-            echo "Created new summary issue #$ISSUE"
-          fi
 
           # Update issue body with the new report
           BODY=$(printf '<!-- backlog-triage-report -->\n_Last updated: %s_\n\n' "$DATE"; cat report.md)
