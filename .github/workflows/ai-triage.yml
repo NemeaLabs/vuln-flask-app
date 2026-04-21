@@ -50,7 +50,7 @@ jobs:
             --baseline "${{ github.event.pull_request.base.sha }}" \
             --scanners semgrep,codeql \
             --github-repo "${{ github.repository }}" \
-            --github-ref  "${{ github.event.pull_request.head.sha }}" \
+            --github-ref  "refs/pull/${{ github.event.pull_request.number }}/head" \
             --out report --fail-on high-tp
           echo "exit_code=$?" >> "$GITHUB_ENV"
           set -e
