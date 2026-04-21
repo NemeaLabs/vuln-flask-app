@@ -135,51 +135,26 @@ jobs:
             gh issue edit "$ISSUE" --remove-label "$lbl" 2>/dev/null || true
           done
 
-          # Parse report.json: apply verdict/severity labels and add codeql-alert-N cache labels
-          python3 - <<'PYEOF'
-import json, os, subprocess, sys
+          # Apply dynamic verdict/severity labels based on report.json
+          # jq is pre-installed on GitHub-hosted runners (ubuntu-latest)
+          if [ -s report.json ] && [ "$(cat report.json)" != "[]" ]; then
+            jq -r '
+              if [.[] | select(.verdict.verdict == "true_positive")]  | length > 0 then "has-true-positives"  else empty end,
+              if [.[] | select(.verdict.verdict == "false_positive")] | length > 0 then "has-false-positives" else empty end,
+              if [.[] | select(.verdict.verdict == "needs_review")]   | length > 0 then "has-needs-review"    else empty end,
+              if [.[] | select(.verdict.verdict == "true_positive" and (.verdict.adjusted_severity // .verdict.severity) == "critical")] | length > 0 then "severity-critical" else empty end,
+              if [.[] | select(.verdict.verdict == "true_positive" and (.verdict.adjusted_severity // .verdict.severity) == "high")]     | length > 0 then "severity-high"     else empty end
+            ' report.json | while read -r lbl; do
+              gh issue edit "$ISSUE" --add-label "$lbl" --repo "$REPO"
+            done
 
-try:
-    data = json.load(open("report.json"))
-except (json.JSONDecodeError, FileNotFoundError):
-    data = []
-
-if not data:
-    sys.exit(0)
-
-verdicts   = [r["verdict"]["verdict"] for r in data]
-severities = [r["verdict"].get("adjusted_severity") or r["verdict"]["severity"] for r in data]
-new_alert_numbers = [
-    r["finding"].get("codeql_alert_number")
-    for r in data
-    if r["finding"].get("codeql_alert_number") is not None
-]
-
-issue = os.environ["ISSUE"]
-repo  = os.environ["REPO"]
-
-def gh(*args):
-    subprocess.run(["gh"] + list(args), check=True)
-
-# Dynamic verdict/severity labels
-labels = []
-if "true_positive"  in verdicts: labels.append("has-true-positives")
-if "false_positive" in verdicts: labels.append("has-false-positives")
-if "needs_review"   in verdicts: labels.append("has-needs-review")
-tp_sevs = [s for v, s in zip(verdicts, severities) if v == "true_positive"]
-if any(s == "critical" for s in tp_sevs): labels.append("severity-critical")
-if any(s == "high"     for s in tp_sevs): labels.append("severity-high")
-
-for lbl in labels:
-    gh("issue", "edit", issue, "--add-label", lbl, "--repo", repo)
-
-# codeql-alert-N skip-cache labels: create then apply
-for n in new_alert_numbers:
-    lbl = f"codeql-alert-{n}"
-    gh("label", "create", lbl,
-       "--color", "ededed",
-       "--description", f"Alert #{n} triaged by AI",
-       "--force",
-       "--repo", repo)
-    gh("issue", "edit", issue, "--add-label", lbl, "--repo", repo)
-PYEOF
+            # Add codeql-alert-N skip-cache labels for newly triaged alerts
+            jq -r '[.[] | .finding.codeql_alert_number | select(. != null)] | .[]' report.json \
+            | while read -r n; do
+              gh label create "codeql-alert-$n" \
+                --color "ededed" \
+                --description "Alert #$n triaged by AI" \
+                --force --repo "$REPO"
+              gh issue edit "$ISSUE" --add-label "codeql-alert-$n" --repo "$REPO"
+            done
+          fi
