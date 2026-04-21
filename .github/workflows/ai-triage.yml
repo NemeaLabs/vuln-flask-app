@@ -30,19 +30,12 @@ jobs:
           pip install -r /tmp/triage/triage-cli/requirements.txt
           pip install semgrep
 
-      - name: Debug providers.py
-        run: |
-          echo "=== providers.py get_provider ==="
-          grep -n "azure.openai\|choice\|def get_provider\|TRIAGE_PROVIDER" /tmp/triage/triage-cli/providers.py
-          echo "=== triage.py get_provider call ==="
-          grep -n "get_provider\|TRIAGE_PROVIDER" /tmp/triage/triage-cli/triage.py
-
       - name: Run triage
         # The CLI picks a provider from TRIAGE_PROVIDER (defaults to
         # anthropic). Only the vars for the chosen provider need to be
         # set in repo secrets; the rest can be empty.
         env:
-          TRIAGE_PROVIDER:    azure-openai
+          TRIAGE_PROVIDER:    ${{ secrets.TRIAGE_PROVIDER }}
           ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL:    ${{ secrets.ANTHROPIC_MODEL }}
           AZURE_AI_ENDPOINT:  ${{ secrets.AZURE_AI_ENDPOINT }}
