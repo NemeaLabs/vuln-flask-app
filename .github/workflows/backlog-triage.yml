@@ -117,11 +117,11 @@ jobs:
 
           # Create issue on first run
           if [ -z "$ISSUE" ]; then
+            printf '<!-- backlog-triage-report -->\n_Initializing — first triage run in progress._\n' > /tmp/init_body.md
             ISSUE=$(gh issue create \
               --title "AI Triage: CodeQL Backlog" \
               --label "ai-triage-backlog" \
-              --body "<!-- backlog-triage-report -->
-_Initializing — first triage run in progress._" \
+              --body-file /tmp/init_body.md \
               --json number --jq '.number')
             echo "Created new summary issue #$ISSUE"
           fi
