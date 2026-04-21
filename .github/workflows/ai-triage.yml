@@ -15,31 +15,24 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      security-events: read
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - uses: actions/setup-python@v5
-        with: { python-version: '3.11', cache: pip }
-
-      - name: Fetch arbiter
-        run: git clone --depth 1 https://github.com/NemeaLabs/arbiter /tmp/triage
-
-      - name: Install deps
-        run: |
-          pip install -r /tmp/triage/triage-cli/requirements.txt
-          pip install semgrep
-
-      - name: Run triage
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          set +e
-          python /tmp/triage/triage-cli/triage.py . \
-            --baseline "${{ github.event.pull_request.base.sha }}" \
-            --out report --fail-on high-tp
-          echo "exit_code=$?" >> "$GITHUB_ENV"
-          set -e
+      - name: Run Arbiter
+        id: arbiter
+        uses: NemeaLabs/arbiter@v1
+        continue-on-error: true
+        with:
+          mode: pr
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
+          baseline: ${{ github.event.pull_request.base.sha }}
+          scanners: semgrep,codeql
+          github-ref: refs/pull/${{ github.event.pull_request.number }}/head
+          fail-on: high-tp
+          out: report
 
       - name: Ensure report exists
         run: |
@@ -48,5 +41,6 @@ jobs:
       - uses: marocchino/sticky-pull-request-comment@v2
         with: { header: ai-triage, path: report.md }
 
-      - if: env.exit_code != '0'
+      - name: Enforce gate
+        if: steps.arbiter.outcome == 'failure'
         run: exit 1
