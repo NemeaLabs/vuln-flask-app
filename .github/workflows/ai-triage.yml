@@ -24,10 +24,18 @@ jobs:
         id: arbiter
         uses: NemeaLabs/arbiter@v1
         continue-on-error: true
+        env:
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          TRIAGE_PROVIDER:      ${{ secrets.TRIAGE_PROVIDER }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL:      ${{ secrets.ANTHROPIC_MODEL }}
+          AZURE_AI_ENDPOINT:    ${{ secrets.AZURE_AI_ENDPOINT }}
+          AZURE_AI_API_KEY:     ${{ secrets.AZURE_AI_API_KEY }}
+          AZURE_AI_MODEL:       ${{ secrets.AZURE_AI_MODEL }}
+          AZURE_AI_API_VERSION: ${{ secrets.AZURE_AI_API_VERSION }}
         with:
           mode: pr
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
           baseline: ${{ github.event.pull_request.base.sha }}
           scanners: semgrep,codeql
           github-ref: refs/pull/${{ github.event.pull_request.number }}/head
