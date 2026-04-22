@@ -144,6 +144,20 @@ def greet():
     return {"message": f"Hello, {name[:50]}"}
 
 
+REPORT_TYPES = {"summary", "detail", "audit"}
+
+@app.route("/report")
+def report():
+    """[V12-FP] FP-trap — subprocess call, but report_type is locked to a closed set."""
+    report_type = request.args.get("type", "summary")
+    if report_type not in REPORT_TYPES:
+        return {"error": "invalid type"}, 400
+    output = subprocess.check_output(
+        ["generate-report", "--type", report_type], text=True
+    )
+    return {"output": output}
+
+
 if __name__ == "__main__":
     # [V9] TP — debug=True in production is RCE via the Werkzeug debugger.
     app.run(host="0.0.0.0", port=5000, debug=True)
