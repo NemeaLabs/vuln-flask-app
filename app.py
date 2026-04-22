@@ -144,6 +144,14 @@ def greet():
     return {"message": f"Hello, {name[:50]}"}
 
 
+@app.route("/export")
+def export():
+    """[V12] TP — path traversal: user-controlled filename used in open() with no sanitization."""
+    filename = request.args.get("file", "report.csv")
+    with open(f"/var/data/{filename}") as fh:
+        return {"data": fh.read()}
+
+
 if __name__ == "__main__":
     # [V9] TP — debug=True in production is RCE via the Werkzeug debugger.
     app.run(host="0.0.0.0", port=5000, debug=True)
