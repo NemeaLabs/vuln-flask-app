@@ -1,26 +1,26 @@
-name: AI Vulnerability Triage
+name: Triage — Semgrep
 
-# Superseded by triage-semgrep.yml, triage-codeql.yml, triage-trivy.yml.
-# Kept as a manual fallback for running semgrep+codeql together in one job.
 on:
-  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
 
 concurrency:
-  group: ai-triage-manual
+  group: triage-semgrep-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  triage:
+  semgrep:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
-      security-events: read
+
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - name: Run Arbiter
+      - name: Run Arbiter (Semgrep)
         id: arbiter
         uses: NemeaLabs/arbiter@v1
         continue-on-error: true
@@ -36,18 +36,19 @@ jobs:
         with:
           mode: pr
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          scanners: semgrep
           baseline: ${{ github.event.pull_request.base.sha }}
-          scanners: semgrep,codeql
-          github-ref: refs/pull/${{ github.event.pull_request.number }}/head
           fail-on: high-tp
-          out: report
+          out: semgrep-report
 
       - name: Ensure report exists
         run: |
-          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report\n\nThe job did not produce a report. Check logs.\n' > report.md
+          [ -f semgrep-report.md ] || printf '<!-- ai-triage-semgrep -->\n# Semgrep Triage\n\nNo report produced. Check logs.\n' > semgrep-report.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
-        with: { header: ai-triage, path: report.md }
+        with:
+          header: ai-triage-semgrep
+          path: semgrep-report.md
 
       - name: Enforce gate
         if: steps.arbiter.outcome == 'failure'

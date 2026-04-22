@@ -1,26 +1,27 @@
-name: AI Vulnerability Triage
+name: Triage — CodeQL
 
-# Superseded by triage-semgrep.yml, triage-codeql.yml, triage-trivy.yml.
-# Kept as a manual fallback for running semgrep+codeql together in one job.
 on:
-  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths-ignore: ['**/*.md', 'docs/**']
 
 concurrency:
-  group: ai-triage-manual
+  group: triage-codeql-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  triage:
+  codeql:
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: write
       security-events: read
+
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - name: Run Arbiter
+      - name: Run Arbiter (GitHub Code Scanning / CodeQL)
         id: arbiter
         uses: NemeaLabs/arbiter@v1
         continue-on-error: true
@@ -36,18 +37,20 @@ jobs:
         with:
           mode: pr
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          baseline: ${{ github.event.pull_request.base.sha }}
-          scanners: semgrep,codeql
+          scanners: github-code-scanning
+          github-repo: ${{ github.repository }}
           github-ref: refs/pull/${{ github.event.pull_request.number }}/head
           fail-on: high-tp
-          out: report
+          out: codeql-report
 
       - name: Ensure report exists
         run: |
-          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report\n\nThe job did not produce a report. Check logs.\n' > report.md
+          [ -f codeql-report.md ] || printf '<!-- ai-triage-codeql -->\n# CodeQL Triage\n\nNo report produced. Check logs.\n' > codeql-report.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
-        with: { header: ai-triage, path: report.md }
+        with:
+          header: ai-triage-codeql
+          path: codeql-report.md
 
       - name: Enforce gate
         if: steps.arbiter.outcome == 'failure'
