@@ -20,7 +20,16 @@ jobs:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
 
-      - name: Run Arbiter (Semgrep)
+      - name: Run Semgrep
+        run: |
+          pip install semgrep
+          semgrep scan \
+            --config auto \
+            --sarif \
+            --output semgrep.sarif \
+            . || true   # non-zero exit on findings is expected; gate is handled by Arbiter
+
+      - name: Run Arbiter (Semgrep SARIF)
         id: arbiter
         uses: NemeaLabs/arbiter@v1
         continue-on-error: true
@@ -36,7 +45,7 @@ jobs:
         with:
           mode: pr
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          scanners: semgrep
+          sarif-file: semgrep.sarif
           baseline: ${{ github.event.pull_request.base.sha }}
           fail-on: high-tp
           out: semgrep-report
