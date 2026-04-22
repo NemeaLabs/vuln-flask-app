@@ -1,4 +1,4 @@
-name: AI Vulnerability Triage — CodeQL
+name: Triage — CodeQL
 
 on:
   pull_request:
@@ -6,11 +6,11 @@ on:
     paths-ignore: ['**/*.md', 'docs/**']
 
 concurrency:
-  group: ai-triage-codeql-${{ github.event.pull_request.number }}
+  group: triage-codeql-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  triage:
+  codeql:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -19,37 +19,38 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
 
-      # Uses the GitHub Code Scanning API — no local scanner needed.
-      # CodeQL alerts already uploaded to GHAS are fetched and triaged.
-      - name: Run Arbiter
+      - name: Run Arbiter (GitHub Code Scanning / CodeQL)
         id: arbiter
         uses: NemeaLabs/arbiter@v1
         continue-on-error: true
         env:
-          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
-          TRIAGE_PROVIDER:   ${{ secrets.TRIAGE_PROVIDER }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL:   ${{ secrets.ANTHROPIC_MODEL }}
-          AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
-          AZURE_AI_API_KEY:  ${{ secrets.AZURE_AI_API_KEY }}
-          AZURE_AI_MODEL:    ${{ secrets.AZURE_AI_MODEL }}
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          TRIAGE_PROVIDER:      ${{ secrets.TRIAGE_PROVIDER }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL:      ${{ secrets.ANTHROPIC_MODEL }}
+          AZURE_AI_ENDPOINT:    ${{ secrets.AZURE_AI_ENDPOINT }}
+          AZURE_AI_API_KEY:     ${{ secrets.AZURE_AI_API_KEY }}
+          AZURE_AI_MODEL:       ${{ secrets.AZURE_AI_MODEL }}
+          AZURE_AI_API_VERSION: ${{ secrets.AZURE_AI_API_VERSION }}
         with:
           mode: pr
           github-token: ${{ secrets.GITHUB_TOKEN }}
           scanners: github-code-scanning
+          github-repo: ${{ github.repository }}
           github-ref: refs/pull/${{ github.event.pull_request.number }}/head
           fail-on: high-tp
-          out: report
+          out: codeql-report
 
       - name: Ensure report exists
         run: |
-          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report (CodeQL)\n\nThe job did not produce a report. Check logs.\n' > report.md
+          [ -f codeql-report.md ] || printf '<!-- ai-triage-codeql -->\n# CodeQL Triage\n\nNo report produced. Check logs.\n' > codeql-report.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
-        with: { header: ai-triage-codeql, path: report.md }
+        with:
+          header: ai-triage-codeql
+          path: codeql-report.md
 
       - name: Enforce gate
         if: steps.arbiter.outcome == 'failure'

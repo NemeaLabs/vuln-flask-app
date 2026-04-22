@@ -70,16 +70,18 @@ jobs:
       # Phase 3: run Arbiter
       - name: Run Arbiter
         uses: NemeaLabs/arbiter@v1
+        env:
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          TRIAGE_PROVIDER:      ${{ secrets.TRIAGE_PROVIDER }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL:      ${{ secrets.ANTHROPIC_MODEL }}
+          AZURE_AI_ENDPOINT:    ${{ secrets.AZURE_AI_ENDPOINT }}
+          AZURE_AI_API_KEY:     ${{ secrets.AZURE_AI_API_KEY }}
+          AZURE_AI_MODEL:       ${{ secrets.AZURE_AI_MODEL }}
+          AZURE_AI_API_VERSION: ${{ secrets.AZURE_AI_API_VERSION }}
         with:
           mode: backlog
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }}
-          triage-provider: ${{ secrets.TRIAGE_PROVIDER }}
-          anthropic-model: ${{ secrets.ANTHROPIC_MODEL }}
-          azure-ai-endpoint: ${{ secrets.AZURE_AI_ENDPOINT }}
-          azure-ai-api-key: ${{ secrets.AZURE_AI_API_KEY }}
-          azure-ai-model: ${{ secrets.AZURE_AI_MODEL }}
-          azure-ai-api-version: ${{ secrets.AZURE_AI_API_VERSION }}
           skip-alerts: ${{ steps.cache.outputs.skip_alerts }}
           post-comments: 'true'
           summary-issue: ${{ steps.cache.outputs.issue_number }}

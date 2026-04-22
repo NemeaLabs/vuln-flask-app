@@ -1,4 +1,4 @@
-name: AI Vulnerability Triage — Trivy
+name: Triage — Trivy
 
 on:
   pull_request:
@@ -6,11 +6,11 @@ on:
     paths-ignore: ['**/*.md', 'docs/**']
 
 concurrency:
-  group: ai-triage-trivy-${{ github.event.pull_request.number }}
+  group: triage-trivy-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
-  triage:
+  trivy:
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -18,45 +18,45 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        with: { fetch-depth: 0 }
 
-      # ── Step 1: run Trivy and produce a SARIF file ────────────────────────
-      - name: Run Trivy
+      - name: Run Trivy (SARIF output)
         uses: aquasecurity/trivy-action@v0.35.0
         with:
           scan-type: fs
           format: sarif
           output: trivy.sarif
-          exit-code: '0'   # don't fail here; Arbiter gate handles it
+          severity: CRITICAL,HIGH,MEDIUM
 
-      # ── Step 2: triage the SARIF output with Arbiter ──────────────────────
-      - name: Run Arbiter
+      - name: Run Arbiter (Trivy SARIF)
         id: arbiter
         uses: NemeaLabs/arbiter@v1
         continue-on-error: true
         env:
-          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
-          TRIAGE_PROVIDER:   ${{ secrets.TRIAGE_PROVIDER }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_MODEL:   ${{ secrets.ANTHROPIC_MODEL }}
-          AZURE_AI_ENDPOINT: ${{ secrets.AZURE_AI_ENDPOINT }}
-          AZURE_AI_API_KEY:  ${{ secrets.AZURE_AI_API_KEY }}
-          AZURE_AI_MODEL:    ${{ secrets.AZURE_AI_MODEL }}
+          GITHUB_TOKEN:         ${{ secrets.GITHUB_TOKEN }}
+          TRIAGE_PROVIDER:      ${{ secrets.TRIAGE_PROVIDER }}
+          ANTHROPIC_API_KEY:    ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL:      ${{ secrets.ANTHROPIC_MODEL }}
+          AZURE_AI_ENDPOINT:    ${{ secrets.AZURE_AI_ENDPOINT }}
+          AZURE_AI_API_KEY:     ${{ secrets.AZURE_AI_API_KEY }}
+          AZURE_AI_MODEL:       ${{ secrets.AZURE_AI_MODEL }}
+          AZURE_AI_API_VERSION: ${{ secrets.AZURE_AI_API_VERSION }}
         with:
           mode: pr
           github-token: ${{ secrets.GITHUB_TOKEN }}
           sarif-file: trivy.sarif
           baseline: ${{ github.event.pull_request.base.sha }}
           fail-on: high-tp
-          out: report
+          out: trivy-report
 
       - name: Ensure report exists
         run: |
-          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report (Trivy)\n\nThe job did not produce a report. Check logs.\n' > report.md
+          [ -f trivy-report.md ] || printf '<!-- ai-triage-trivy -->\n# Trivy Triage\n\nNo report produced. Check logs.\n' > trivy-report.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
-        with: { header: ai-triage-trivy, path: report.md }
+        with:
+          header: ai-triage-trivy
+          path: trivy-report.md
 
       - name: Enforce gate
         if: steps.arbiter.outcome == 'failure'
