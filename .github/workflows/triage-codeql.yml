@@ -1,4 +1,4 @@
-name: AI Vulnerability Triage — Semgrep
+name: AI Vulnerability Triage — CodeQL
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
     paths-ignore: ['**/*.md', 'docs/**']
 
 concurrency:
-  group: ai-triage-${{ github.event.pull_request.number }}
+  group: ai-triage-codeql-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -22,17 +22,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      # ── Step 1: run Semgrep and produce a SARIF file ──────────────────────
-      - name: Run Semgrep
-        run: |
-          pip install semgrep
-          semgrep scan \
-            --config auto \
-            --sarif \
-            --output semgrep.sarif \
-            . || true   # non-zero exit on findings is expected; don't fail here
-
-      # ── Step 2: triage the SARIF output with Arbiter ──────────────────────
+      # Uses the GitHub Code Scanning API — no local scanner needed.
+      # CodeQL alerts already uploaded to GHAS are fetched and triaged.
       - name: Run Arbiter
         id: arbiter
         uses: NemeaLabs/arbiter@v1
@@ -48,17 +39,17 @@ jobs:
         with:
           mode: pr
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          sarif-file: semgrep.sarif
-          baseline: ${{ github.event.pull_request.base.sha }}
+          scanners: github-code-scanning
+          github-ref: refs/pull/${{ github.event.pull_request.number }}/head
           fail-on: high-tp
           out: report
 
       - name: Ensure report exists
         run: |
-          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report\n\nThe job did not produce a report. Check logs.\n' > report.md
+          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report (CodeQL)\n\nThe job did not produce a report. Check logs.\n' > report.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
-        with: { header: ai-triage, path: report.md }
+        with: { header: ai-triage-codeql, path: report.md }
 
       - name: Enforce gate
         if: steps.arbiter.outcome == 'failure'

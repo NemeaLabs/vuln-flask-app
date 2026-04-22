@@ -1,4 +1,4 @@
-name: AI Vulnerability Triage — Semgrep
+name: AI Vulnerability Triage — Trivy
 
 on:
   pull_request:
@@ -6,7 +6,7 @@ on:
     paths-ignore: ['**/*.md', 'docs/**']
 
 concurrency:
-  group: ai-triage-${{ github.event.pull_request.number }}
+  group: ai-triage-trivy-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 jobs:
@@ -15,22 +15,20 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      security-events: read
 
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ── Step 1: run Semgrep and produce a SARIF file ──────────────────────
-      - name: Run Semgrep
-        run: |
-          pip install semgrep
-          semgrep scan \
-            --config auto \
-            --sarif \
-            --output semgrep.sarif \
-            . || true   # non-zero exit on findings is expected; don't fail here
+      # ── Step 1: run Trivy and produce a SARIF file ────────────────────────
+      - name: Run Trivy
+        uses: aquasecurity/trivy-action@v0.35.0
+        with:
+          scan-type: fs
+          format: sarif
+          output: trivy.sarif
+          exit-code: '0'   # don't fail here; Arbiter gate handles it
 
       # ── Step 2: triage the SARIF output with Arbiter ──────────────────────
       - name: Run Arbiter
@@ -48,17 +46,17 @@ jobs:
         with:
           mode: pr
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          sarif-file: semgrep.sarif
+          sarif-file: trivy.sarif
           baseline: ${{ github.event.pull_request.base.sha }}
           fail-on: high-tp
           out: report
 
       - name: Ensure report exists
         run: |
-          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report\n\nThe job did not produce a report. Check logs.\n' > report.md
+          [ -f report.md ] || printf '<!-- ai-triage-report -->\n# AI Triage Report (Trivy)\n\nThe job did not produce a report. Check logs.\n' > report.md
 
       - uses: marocchino/sticky-pull-request-comment@v2
-        with: { header: ai-triage, path: report.md }
+        with: { header: ai-triage-trivy, path: report.md }
 
       - name: Enforce gate
         if: steps.arbiter.outcome == 'failure'
